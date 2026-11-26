@@ -21,6 +21,19 @@ pub struct Config {
     pub log: Log,
     pub limits: Limits,
     pub dns: Dns,
+    pub zero_access: ZeroAccess,
+}
+
+/// Pinal's zero-access mail (src/za.rs): where Pinal Accounts is and the
+/// shared secret for its internal API (`ZA_INTERNAL_SECRET` there).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct ZeroAccess {
+    /// e.g. https://accounts.pinal.tech. Unset: no account is zero-access.
+    pub accounts_url: Option<String>,
+    pub secret: Option<String>,
+    /// A file holding the secret (preferred over `secret`).
+    pub secret_file: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

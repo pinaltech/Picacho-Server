@@ -155,6 +155,8 @@ struct Session {
     access: crate::auth::Access,
     /// Tag of the command being executed (for ESEARCH).
     tag: String,
+    /// Keeps a zero-access account's keys open while connected (src/za.rs).
+    za: Option<crate::za::SessionGuard>,
 }
 
 pub async fn handle(state: State, stream: Stream, peer: SocketAddr) {
@@ -173,6 +175,7 @@ pub async fn handle(state: State, stream: Stream, peer: SocketAddr) {
         qresync: false,
         access: crate::auth::Access::Write,
         tag: String::new(),
+        za: None,
     };
     if s.state.limiter.is_banned(s.peer) && !crate::util::ip_in_list(s.peer, &s.state.settings().security.allowlist) {
         s.conn.push("* BYE Too many failed logins. Try again later.\r\n");
@@ -482,6 +485,7 @@ impl Session {
             *c += 1;
         }
         self.counted = Some(account.id);
+        self.za = crate::za::session(account.id);
         let _ = self.state.db.touch_login(account.id).await;
         self.account = Some(account);
         let caps = self.capabilities();
@@ -506,6 +510,7 @@ impl Session {
                 Ok(Resp::No("[UNAVAILABLE] Try again later.".into()))
             }
             Err(crate::auth::AuthError::Disabled) => Ok(Resp::No("[AUTHORIZATIONFAILED] Account disabled.".into())),
+            Err(crate::auth::AuthError::ZeroAccess) => Ok(Resp::No("[AUTHORIZATIONFAILED] Pinal Mail is zero-access: use an app password from accounts.pinal.tech/account#privacy (Open mode), or the Picacho app.".into())),
             Err(_) => {
                 tokio::time::sleep(Duration::from_millis(300)).await;
                 Ok(Resp::No("[AUTHENTICATIONFAILED] Authentication failed.".into()))

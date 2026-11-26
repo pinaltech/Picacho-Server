@@ -115,3 +115,11 @@
 
 [dns]
 # resolver = "system"             # "cloudflare", "google", "quad9"
+
+[zero_access]
+# Pinal's zero-access mail (src/za.rs). With these set, accounts linked to
+# Pinal whose person turned on Mail in Pinal Accounts' Privacy tab get every
+# message sealed to their own key; the server can read them only during
+# Open-mode sessions signed in with a Pinal app password.
+# accounts_url = "https://accounts.pinal.tech"
+# secret_file = "/etc/picacho/za-internal.secret"   # = ZA_INTERNAL_SECRET at Pinal Accounts

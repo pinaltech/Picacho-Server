@@ -111,6 +111,7 @@ async fn authenticate_access(
                 Err(problem(StatusCode::FORBIDDEN, "about:blank", "Account passwords are turned off; use an app password or OAuth."))
             }
             Err(crate::auth::AuthError::Banned) => Err(problem(StatusCode::TOO_MANY_REQUESTS, "about:blank", "Too many failed logins.")),
+            Err(crate::auth::AuthError::ZeroAccess) => Err(problem(StatusCode::FORBIDDEN, "about:blank", "Pinal Mail is zero-access: use an app password from accounts.pinal.tech/account#privacy (Open mode), or the Picacho app.")),
             Err(_) => Err(unauthorized()),
         };
     }

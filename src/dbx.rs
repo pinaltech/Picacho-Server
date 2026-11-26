@@ -146,7 +146,7 @@ async fn full_text_index(db: &Db) -> Result<()> {
     Ok(())
 }
 
-fn fts_id_col(db: &Db) -> &'static str {
+pub fn fts_id_col(db: &Db) -> &'static str {
     if db.kind == DatabaseKind::Sqlite {
         "rowid"
     } else {
@@ -164,7 +164,7 @@ pub fn spawn_indexer(state: crate::state::State) {
     tokio::spawn(async move {
         loop {
             let col = fts_id_col(&state.db);
-            let rows = sqlx::query(&format!("SELECT id, blob FROM messages WHERE id NOT IN (SELECT {col} FROM message_fts) ORDER BY id DESC LIMIT 200"))
+            let rows = sqlx::query(&format!("SELECT id, blob FROM messages WHERE id NOT IN (SELECT {col} FROM message_fts) AND blob NOT LIKE 'z/%' ORDER BY id DESC LIMIT 200"))
                 .fetch_all(&state.db.pool)
                 .await
                 .unwrap_or_default();

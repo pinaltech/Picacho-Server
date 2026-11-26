@@ -343,6 +343,9 @@ impl Session {
             Err(crate::auth::AuthError::PasswordDisabled) => {
                 self.reply(535, "5.7.8 Account passwords are turned off; use an app password or OAuth");
             }
+            Err(crate::auth::AuthError::ZeroAccess) => {
+                self.reply(535, "5.7.8 Pinal Mail is zero-access: use an app password from accounts.pinal.tech/account#privacy (Open mode), or the Picacho app");
+            }
             Ok(a) => {
                 self.state.event("info", "auth", &format!("smtp login {} from {}", a.email, self.peer));
                 self.account = Some(a);

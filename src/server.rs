@@ -37,39 +37,68 @@ pub async fn store_message(
     internal_date: Option<i64>,
 ) -> Result<i64, StoreError> {
     let size = raw.len() as i64;
-    if let Some(a) = state.db.get_account(account_id).await? {
+    let account = state.db.get_account(account_id).await?;
+    if let Some(a) = &account {
         if a.quota_bytes > 0 && a.used_bytes + size > a.quota_bytes {
             return Err(StoreError::OverQuota);
         }
     }
+    // Zero-access accounts (src/za.rs): sealed to the account's own key.
+    let za_key = match &account {
+        Some(a) => crate::za::mail_key(state, a).await?,
+        None => None,
+    };
     let summary = if raw.len() > 1 << 20 {
         let owned = raw.to_vec();
         tokio::task::spawn_blocking(move || crate::mime::summarize(&owned)).await.map_err(|e| anyhow::anyhow!(e))?
     } else {
         crate::mime::summarize(raw)
     };
-    let key = state.blobs.put_message(raw).await?;
-    let inserted = state
-        .db
-        .insert_message(
-            mb.id,
-            &NewMessage {
-                blob: &key,
-                size,
-                internal_date: internal_date.unwrap_or_else(crate::util::now),
-                flags,
-                envelope: &summary.envelope,
-                bodystructure: &summary.bodystructure,
-                body: &summary.body,
-                subject: &summary.subject,
-                from_addr: &summary.from,
-                meta: &summary.meta,
-                msgid: &summary.msgid,
-                refs: &summary.refs,
-                thread_id: 0,
-            },
-        )
-        .await;
+    let sealed = match &za_key {
+        Some(k) => Some(crate::za::seal_message(account_id, k, raw, &summary)?),
+        None => None,
+    };
+    let key = match &sealed {
+        Some(s) => {
+            state.blobs.put_sealed(&s.blob_key, s.blob.clone()).await?;
+            s.blob_key.clone()
+        }
+        None => state.blobs.put_message(raw).await?,
+    };
+    let message = match &sealed {
+        // Only the sealed index and hashed Message-IDs (for threading) are stored.
+        Some(s) => NewMessage {
+            blob: &key,
+            size,
+            internal_date: internal_date.unwrap_or_else(crate::util::now),
+            flags,
+            envelope: &s.row,
+            bodystructure: "",
+            body: "",
+            subject: "",
+            from_addr: "",
+            meta: "",
+            msgid: &s.msgid,
+            refs: &s.refs,
+            thread_id: 0,
+        },
+        None => NewMessage {
+            blob: &key,
+            size,
+            internal_date: internal_date.unwrap_or_else(crate::util::now),
+            flags,
+            envelope: &summary.envelope,
+            bodystructure: &summary.bodystructure,
+            body: &summary.body,
+            subject: &summary.subject,
+            from_addr: &summary.from,
+            meta: &summary.meta,
+            msgid: &summary.msgid,
+            refs: &summary.refs,
+            thread_id: 0,
+        },
+    };
+    let inserted = state.db.insert_message(mb.id, &message).await;
     let (uid, _, _) = match inserted {
         Ok(v) => v,
         Err(e) => {

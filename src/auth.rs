@@ -63,6 +63,9 @@ pub enum AuthError {
     Internal,
     /// Account passwords are turned off for this service.
     PasswordDisabled,
+    /// A zero-access account (src/za.rs) needs an app password from Pinal
+    /// (Open mode) to read mail here.
+    ZeroAccess,
 }
 
 /// What a credential may do on a service.
@@ -156,6 +159,12 @@ pub fn is_token(password: &str) -> bool {
 /// Sign in to a mail service with a password, app password or OAuth token
 /// or provider access token (as the password, or via SASL XOAUTH2/OAUTHBEARER).
 pub async fn login_service(state: &State, email: &str, password: &str, ip: IpAddr, svc: Service) -> Result<(Account, Access), AuthError> {
+    let found = state.db.account_by_email(email.trim()).await.map_err(|_| AuthError::Internal)?;
+    if let Some(account) = found.filter(|a| a.active) {
+        if crate::za::is_zero_access(state, account.id).await {
+            return zero_access_login(state, account, password, ip, svc).await;
+        }
+    }
     if is_token(password) {
         let sec = state.settings().security.clone();
         let allowlisted = crate::util::ip_in_list(ip, &sec.allowlist);
@@ -179,6 +188,51 @@ pub async fn login_service(state: &State, email: &str, password: &str, ip: IpAdd
         return Err(AuthError::PasswordDisabled);
     }
     login(state, email, password, ip).await.map(|a| (a, Access::Write))
+}
+
+/// Zero-access accounts sign in to mail services only with a Pinal app
+/// password (Open mode), which also opens their mail keys in memory. Their
+/// account password, API tokens and Pinal access tokens can't read mail here
+/// (Private mode: Pinal's apps read ciphertext through the REST API instead).
+/// Filters and calendars/contacts keep their usual sign-in.
+async fn zero_access_login(state: &State, account: Account, password: &str, ip: IpAddr, svc: Service) -> Result<(Account, Access), AuthError> {
+    let sec = state.settings().security.clone();
+    let allowlisted = crate::util::ip_in_list(ip, &sec.allowlist);
+    if !allowlisted && state.limiter.is_banned(ip) {
+        return Err(AuthError::Banned);
+    }
+    if crate::za::looks_like_app_password(password.trim()) {
+        match crate::za::unlock_with_app_password(state, &account, password.trim()).await {
+            Ok(true) => {
+                state.limiter.success(ip);
+                return Ok((account, Access::Write));
+            }
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, "zero-access app password check failed");
+                return Err(AuthError::Internal);
+            }
+        }
+        crate::metrics::AUTH_FAILURES.inc();
+        if !allowlisted && state.limiter.fail(ip, sec.max_auth_failures, sec.auth_failure_window_secs, sec.ban_secs) {
+            state.event("warn", "security", &format!("banned {ip} for {}s after repeated failed logins", sec.ban_secs));
+        }
+        return Err(AuthError::Invalid);
+    }
+    if matches!(svc, Service::Imap | Service::Jmap | Service::Smtp) {
+        return Err(AuthError::ZeroAccess);
+    }
+    // Filters and DAV: the usual credentials.
+    if is_token(password) {
+        if let Some(p) = bearer_principal(state, password).await {
+            let lvl = access(&p.scopes, svc);
+            if p.account.id == account.id && lvl > Access::None {
+                return Ok((p.account, lvl));
+            }
+        }
+        return Err(AuthError::Invalid);
+    }
+    login(state, &account.email, password, ip).await.map(|a| (a, Access::Write))
 }
 
 /// Parse a SASL XOAUTH2 or OAUTHBEARER (RFC 7628) client response into (user, token).

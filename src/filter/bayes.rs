@@ -248,6 +248,10 @@ pub async fn learn(state: &State, account: i64, raw: &[u8], spam: bool) -> Resul
 
 /// Learn from a stored message (by blob) in the background.
 pub fn learn_blob(state: &State, account: i64, blob: String, spam: bool) {
+    // Zero-access messages: their words must not end up in the token tables.
+    if blob.starts_with(crate::za::BLOB_PREFIX) {
+        return;
+    }
     let st = state.clone();
     tokio::spawn(async move {
         if let Ok(raw) = st.blobs.get(&blob).await {

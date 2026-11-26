@@ -70,6 +70,10 @@ rust-embed = { version = "8", features = ["include-exclude"] }
 mime_guess = "2"
 uuid = { version = "1", features = ["v4"] }
 ring = "0.17"
+# Zero-access mail (src/za.rs): Pinal's za.js formats.
+hpke = { version = "0.12", default-features = false, features = ["alloc", "x25519"] }
+hkdf = "0.12"
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
 tempfile = "3"
