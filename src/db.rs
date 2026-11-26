@@ -267,6 +267,13 @@ fn mailbox_from(r: &AnyRow) -> Result<Mailbox> {
 }
 
 fn message_from(r: &AnyRow) -> Result<MessageRow> {
+    let mut row = message_plain(r)?;
+    // Zero-access rows open only while their account's keys are in memory.
+    crate::za::open_row(&mut row);
+    Ok(row)
+}
+
+fn message_plain(r: &AnyRow) -> Result<MessageRow> {
     Ok(MessageRow {
         id: r.try_get("id")?,
         uid: r.try_get("uid")?,
@@ -382,6 +389,10 @@ fn schema(kind: &DatabaseKind) -> Vec<String> {
             id {id}, account_id {int} NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, blob TEXT NOT NULL,
             size {int} NOT NULL, ctype TEXT NOT NULL, created_at {int} NOT NULL)"),
         s("CREATE INDEX IF NOT EXISTS send_log_idx ON send_log (account_id, ts)"),
+        // Zero-access accounts (src/za.rs): their mail public key only.
+        s("CREATE TABLE IF NOT EXISTS za_accounts (
+            account_id {int} PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+            version {int} NOT NULL, public_key TEXT NOT NULL, mode TEXT NOT NULL, updated {int} NOT NULL)"),
     ]
 }
 
@@ -1644,7 +1655,7 @@ impl Db {
     }
 
     pub async fn messages_missing_meta(&self, limit: i64) -> Result<Vec<(i64, String)>> {
-        let rows = sqlx::query("SELECT id, blob FROM messages WHERE meta = '' LIMIT $1")
+        let rows = sqlx::query("SELECT id, blob FROM messages WHERE meta = '' AND envelope NOT LIKE 'za1:%' LIMIT $1")
             .bind(limit)
             .fetch_all(&self.pool)
             .await?;

@@ -178,6 +178,8 @@ async fn serve(cfg: Config, path: PathBuf) -> anyhow::Result<()> {
     picacho_server::ops::spawn_maintenance(state.clone());
     picacho_server::acme::spawn(state.clone());
     picacho_server::dbx::spawn_indexer(state.clone());
+    // Zero-access mail: re-check app passwords, drop idle keys (src/za.rs).
+    tokio::spawn(picacho_server::za::keeper(state.clone()));
     {
         // Compute header metadata (SORT/THREAD/JMAP) for messages stored by older versions.
         let st = state.clone();

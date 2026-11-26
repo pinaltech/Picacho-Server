@@ -183,6 +183,23 @@ curl -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json"
 
 On the **downstream** server, set live settings `relay.upstream = {enabled: true, url: "https://mx.example.net:8080", token: "pmrl_…", inbound: true, outbound: true}`. Point the domain's MX at the public server. The downstream long-polls for inbound mail (only outbound HTTPS is needed) and hands outbound mail to the upstream, which only accepts senders in the peer's domains. Use `kind = "picacho"` transports to route only some domains through an upstream.
 
+## Zero-access mail (Pinal)
+
+With `[zero_access]` set (see `config.example.toml`), accounts linked to Pinal
+Accounts can be **zero-access** (`src/za.rs`): once the person turns on Mail in
+the Privacy tab, every arriving message (and the existing mailbox, once) is
+sealed to their own mail key. Stored blobs (`z/<account>/…`) are `PZA1`
+ciphertext; the message row keeps only a sealed index and keyed hashes of
+Message-IDs (threading); full-text indexing and Bayes learning skip them.
+
+- **Private mode:** nothing on the server can open them; IMAP, JMAP and SMTP
+  refuse the account's password and tokens with a clear message.
+- **Open mode:** standard apps sign in with a Pinal app password. Pinal
+  Accounts checks it and returns the keys wrapped by it; they're opened in
+  memory, used while the app is connected, re-checked every minute (deleting
+  the password or going Private cuts apps off) and dropped when idle.
+- Filters, calendars and contacts are unchanged for now.
+
 ## Security
 
 - TLS 1.2+ (rustls, ring); STARTTLS discards pipelined plaintext (no command injection); plaintext passwords refused without TLS (configurable for localhost).

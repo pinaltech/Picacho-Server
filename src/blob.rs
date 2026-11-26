@@ -245,6 +245,12 @@ impl Cache {
             self.order.retain(|x| x != k);
         }
     }
+    fn retain_prefix_not(&mut self, prefix: &str) {
+        let gone: Vec<String> = self.map.keys().filter(|k| k.starts_with(prefix)).cloned().collect();
+        for k in gone {
+            self.remove(&k);
+        }
+    }
 }
 
 pub struct BlobStore {
@@ -462,8 +468,32 @@ impl BlobStore {
         self.messages.put(key, self.seal(&data)).await
     }
 
+    /// Store an already sealed zero-access message (src/za.rs) as-is: it's
+    /// ciphertext under the account's own keys, not the server's.
+    pub async fn put_sealed(&self, key: &str, data: Vec<u8>) -> Result<()> {
+        let _g = Self::lock_for(&self.msg_locks, key).lock().await;
+        self.db.incr_blob(key, data.len() as i64).await?;
+        if let Err(e) = self.messages.put(key, data).await {
+            let _ = self.db.release_blob(key).await;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Drop cached plaintext of one account's sealed messages (keys locked).
+    pub fn forget_prefix(&self, prefix: &str) {
+        self.cache.lock().retain_prefix_not(prefix);
+    }
+
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>> {
         if let Some(v) = self.cache.lock().get(key) {
+            return Ok(v);
+        }
+        if key.starts_with(crate::za::BLOB_PREFIX) {
+            // Zero-access: only with the account's keys in memory (Open mode).
+            let sealed = self.messages.get(key).await?;
+            let v = Arc::new(crate::za::open_blob(key, &sealed)?);
+            self.cache.lock().put(key.to_string(), v.clone());
             return Ok(v);
         }
         let data = self.open(self.messages.get(key).await?)?;
